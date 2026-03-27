@@ -1,3 +1,9 @@
 .CVEfixes.ini
 CVEfixes*.db
 CVEfixes*.sql.gz
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
