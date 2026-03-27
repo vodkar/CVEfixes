@@ -1,3 +1,4 @@
+# Legacy SQLite-based dependencies (kept for compatibility with Code/)
 pandas~=1.2.4
 numpy~=1.19.2
 requests~=2.24
@@ -8,3 +9,14 @@ tensorflow==2.5.0
 jupyter
 seaborn
 matplotlib
+
+# New Parquet/DuckDB storage layer
+polars>=0.20.0
+pyarrow>=14.0.0
+duckdb>=0.10.0
+zstandard>=0.22.0
+pydantic>=2.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
