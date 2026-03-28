@@ -99,10 +99,12 @@ def _build_synthetic_staging(parquet_base: Path) -> None:
     _write_staging(parquet_base, "file_change", [
         {"file_change_id": 1, "hash": "abc123", "filename": "vuln.c",
          "programming_language": "C", "num_lines_added": 10, "num_lines_deleted": 5,
-         "code_before_hash": None, "diff": None, "nloc": 50, "complexity": 8},
+         "code_before_hash": "a" * 64, "code_after_hash": "b" * 64,
+         "diff": None, "nloc": 50, "complexity": 8},
         {"file_change_id": 2, "hash": "def456", "filename": "query.py",
          "programming_language": "Python", "num_lines_added": 20, "num_lines_deleted": 3,
-         "code_before_hash": None, "diff": None, "nloc": 30, "complexity": 4},
+         "code_before_hash": "c" * 64, "code_after_hash": "d" * 64,
+         "diff": None, "nloc": 30, "complexity": 4},
     ])
 
     _write_staging(parquet_base, "method_change", [
@@ -223,3 +225,42 @@ class TestBlobStoreIntegration:
         hashes = [store.write(shared_source) for _ in range(10)]
         assert len(set(hashes)) == 1  # all the same hash
         assert store.stats()["blob_count"] == 1
+
+    def test_code_before_and_after_stored_separately(self, tmp_path):
+        """code_before and code_after should produce distinct blob hashes."""
+        store = BlobStore(tmp_path / "blobs")
+        before_src = b"int vuln() { strcpy(buf, input); }"
+        after_src = b"int vuln() { strncpy(buf, input, sizeof(buf) - 1); }"
+
+        before_hash = store.write(before_src)
+        after_hash = store.write(after_src)
+
+        assert before_hash != after_hash
+        assert store.stats()["blob_count"] == 2
+        assert store.read(before_hash) == before_src
+        assert store.read(after_hash) == after_src
+
+    def test_code_after_hash_survives_parquet_roundtrip(self, tmp_path):
+        """Verify code_after_hash is written to and readable from Parquet."""
+        parquet_base = tmp_path / "parquet"
+        _build_synthetic_staging(parquet_base)
+        parquet_writer.finalize(parquet_base, clear_staging=False)
+
+        # Read the C partition (file_change_id=1 with code_after_hash="b"*64)
+        c_dir = parquet_base / "file_change" / "language=C"
+        df = pl.read_parquet(c_dir / "data.parquet")
+        assert "code_after_hash" in df.columns
+        after_hash = df["code_after_hash"][0]
+        assert after_hash == "b" * 64
+
+    def test_code_before_hash_survives_parquet_roundtrip(self, tmp_path):
+        """Verify code_before_hash is written to and readable from Parquet."""
+        parquet_base = tmp_path / "parquet"
+        _build_synthetic_staging(parquet_base)
+        parquet_writer.finalize(parquet_base, clear_staging=False)
+
+        py_dir = parquet_base / "file_change" / "language=Python"
+        df = pl.read_parquet(py_dir / "data.parquet")
+        assert "code_before_hash" in df.columns
+        before_hash = df["code_before_hash"][0]
+        assert before_hash == "c" * 64

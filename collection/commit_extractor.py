@@ -3,8 +3,8 @@ Commit extractor — traverses git repositories with PyDriller and writes
 staging Parquet files for commits, file_change, and method_change.
 
 Key differences from the original Code/collect_commits.py:
-- code_before is written to the blob store; only its SHA-256 hash is stored
-- code_after is NOT stored at all
+- code_before and code_after are both written to the blob store; only their
+  SHA-256 hashes are stored in the file_change table
 - method_change stores start_line/end_line only (no inline code column)
 - Only before_change=True method rows are written
 - Output goes to staging Parquet, not SQLite
@@ -119,11 +119,16 @@ def _get_file_rows(
             prog_lang = _guess_language(file.source_code)
             file_change_id = uuid.uuid4().int & 0x7FFFFFFFFFFFFFFF
 
-            # Store code_before in blob store; keep only its hash
+            # Store code_before and code_after in blob store; keep only hashes
             code_before_hash: str | None = None
             if file.source_code_before is not None:
                 raw = file.source_code_before.encode("utf-8", errors="replace")
                 code_before_hash = blob_store.write(raw)
+
+            code_after_hash: str | None = None
+            if file.source_code is not None:
+                raw = file.source_code.encode("utf-8", errors="replace")
+                code_after_hash = blob_store.write(raw)
 
             file_rows.append({
                 "file_change_id": file_change_id,
@@ -133,6 +138,7 @@ def _get_file_rows(
                 "num_lines_added": file.added_lines,
                 "num_lines_deleted": file.deleted_lines,
                 "code_before_hash": code_before_hash,
+                "code_after_hash": code_after_hash,
                 "diff": _compress_diff(file.diff),
                 "nloc": file.nloc,
                 "complexity": file.complexity,

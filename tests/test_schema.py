@@ -74,6 +74,20 @@ class TestFileChangeRecord:
         r = FileChangeRecord(file_change_id=1, hash="abc")
         assert r.code_before_hash is None
 
+    def test_code_after_hash_optional(self):
+        r = FileChangeRecord(file_change_id=1, hash="abc")
+        assert r.code_after_hash is None
+
+    def test_both_hashes_can_be_set(self):
+        before = "a" * 64
+        after = "b" * 64
+        r = FileChangeRecord(
+            file_change_id=1, hash="abc",
+            code_before_hash=before, code_after_hash=after,
+        )
+        assert r.code_before_hash == before
+        assert r.code_after_hash == after
+
 
 class TestMethodChangeRecord:
     def test_before_change_default_false(self):
@@ -116,12 +130,18 @@ class TestArrowSchemas:
         assert "severity_v2" in names
         assert "severity_v3" in names
 
-    def test_file_change_has_blob_ref(self):
+    def test_file_change_has_blob_refs(self):
         names = {f.name for f in FILE_CHANGE_SCHEMA}
         assert "code_before_hash" in names
-        # No code_before or code_after stored inline
+        assert "code_after_hash" in names
+        # No inline source code columns — only blob-store references
         assert "code_before" not in names
         assert "code_after" not in names
+
+    def test_file_change_blob_refs_are_strings(self):
+        fields = {f.name: f for f in FILE_CHANGE_SCHEMA}
+        assert pa.types.is_string(fields["code_before_hash"].type)
+        assert pa.types.is_string(fields["code_after_hash"].type)
 
     def test_method_change_no_code_column(self):
         names = {f.name for f in METHOD_CHANGE_SCHEMA}

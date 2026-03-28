@@ -86,6 +86,7 @@ class FileChangeRecord(BaseModel):
     num_lines_added: Optional[int] = None
     num_lines_deleted: Optional[int] = None
     code_before_hash: Optional[str] = None   # SHA-256 reference into blob store
+    code_after_hash: Optional[str] = None    # SHA-256 reference into blob store
     diff: Optional[bytes] = None             # stored inline, zstd-compressed
     nloc: Optional[int] = None
     complexity: Optional[int] = None
@@ -155,16 +156,17 @@ FIXES_SCHEMA = pa.schema([
 ])
 
 FILE_CHANGE_SCHEMA = pa.schema([
-    pa.field("file_change_id",      pa.int64(), nullable=False),
-    pa.field("hash",                pa.string()),
-    pa.field("filename",            pa.string()),
+    pa.field("file_change_id",       pa.int64(), nullable=False),
+    pa.field("hash",                 pa.string()),
+    pa.field("filename",             pa.string()),
     pa.field("programming_language", pa.dictionary(pa.int32(), pa.string())),
-    pa.field("num_lines_added",     pa.int32()),
-    pa.field("num_lines_deleted",   pa.int32()),
-    pa.field("code_before_hash",    pa.string()),   # blob store reference
-    pa.field("diff",                pa.large_binary()),  # inline zstd diff
-    pa.field("nloc",                pa.int32()),
-    pa.field("complexity",          pa.int32()),
+    pa.field("num_lines_added",      pa.int32()),
+    pa.field("num_lines_deleted",    pa.int32()),
+    pa.field("code_before_hash",     pa.string()),   # blob store reference (pre-fix)
+    pa.field("code_after_hash",      pa.string()),   # blob store reference (post-fix)
+    pa.field("diff",                 pa.large_binary()),  # inline zstd diff
+    pa.field("nloc",                 pa.int32()),
+    pa.field("complexity",           pa.int32()),
 ])
 
 METHOD_CHANGE_SCHEMA = pa.schema([
