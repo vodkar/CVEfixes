@@ -160,17 +160,43 @@ def run_weekly_update(
     logger.info("Affected language partitions: %s", affected_langs or ["(none)"])
 
     # ------------------------------------------------------------------
-    # Step 7: Optimization pass (affected partitions + metadata append)
+    # Step 7: Append new metadata to production files, then rewrite only the
+    # affected language partitions.  Using skip_metadata=True prevents
+    # finalize() from overwriting existing production metadata with only the
+    # new (staging) rows — _append_metadata() merges new + existing instead.
     # ------------------------------------------------------------------
-    logger.info("Step 7: Running optimization pass …")
+    logger.info("Step 7: Appending new metadata rows to production files …")
+    metadata_dir = parquet_base / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load staging frames (may be None on a dry run)
+    _stg_cve = stg.load(staging_base, "cve")
+    _stg_fixes = stg.load(staging_base, "fixes")
+    _stg_cwe = stg.load(staging_base, "cwe")
+    _stg_class = stg.load(staging_base, "cwe_classification")
+    _stg_repo = stg.load(staging_base, "repository")
+    _stg_commits = stg.load(staging_base, "commits")
+
+    if _stg_cve is not None:
+        _append_metadata(_stg_cve, metadata_dir / "cve.parquet", ["cve_id"])
+    if _stg_fixes is not None:
+        _append_metadata(_stg_fixes, metadata_dir / "fixes.parquet", ["cve_id", "hash"])
+    if _stg_cwe is not None:
+        _append_metadata(_stg_cwe, metadata_dir / "cwe.parquet", ["cwe_id"])
+    if _stg_class is not None:
+        _append_metadata(_stg_class, metadata_dir / "cwe_classification.parquet", ["cve_id", "cwe_id"])
+    if _stg_repo is not None:
+        _append_metadata(_stg_repo, metadata_dir / "repository.parquet", ["repo_url"])
+    if _stg_commits is not None:
+        _append_metadata(_stg_commits, metadata_dir / "commits.parquet", ["hash"])
+
+    logger.info("Step 7b: Rewriting affected language partitions …")
     parquet_writer.finalize(
         base_path=parquet_base,
         affected_languages=affected_langs if affected_langs else None,
         clear_staging=True,
+        skip_metadata=True,
     )
-
-    # Append new metadata rows to production files (in case finalize wrote
-    # to staging-named files; they were already merged by writer.finalize)
 
     # ------------------------------------------------------------------
     # Step 8: Rebuild DuckDB catalog

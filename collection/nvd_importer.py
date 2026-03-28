@@ -9,7 +9,6 @@ Output: parquet/staging/cve_staging.parquet
 
 from __future__ import annotations
 
-import ast
 import datetime
 import json
 import logging
@@ -21,7 +20,6 @@ from zipfile import ZipFile
 
 import polars as pl
 import requests
-from pandas import json_normalize
 
 logger = logging.getLogger("cvefixes.nvd_importer")
 
@@ -33,23 +31,6 @@ GIT_COMMIT_RE = re.compile(
     r"(((?P<repo>(https|http)://(bitbucket|github|gitlab)\.(org|com)/(?P<owner>[^/]+)/(?P<project>[^/]*))"
     r"/(commit|commits)/(?P<hash>\w+)#?)+)"
 )
-
-# Columns from NVD JSON that we keep in the CVE table
-_ORDERED_CVE_COLUMNS = [
-    "cve_id", "published_date", "last_modified_date", "description",
-    "severity", "cvss2_base_score", "cvss3_base_score",
-    "reference_json", "problemtype_json",
-]
-
-
-def _rename_column(name: str) -> str:
-    name = name.split(".", 2)[-1].replace(".", "_")
-    name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    name = (name
-            .replace("cvss_v", "cvss")
-            .replace("_data", "_json")
-            .replace("description_json", "description"))
-    return name
 
 
 def _download_year(year: int, json_dir: Path) -> Path:

@@ -69,8 +69,8 @@ class BlobStore:
         """
         Return lines [start_line, end_line] (1-based, inclusive) from the blob.
 
-        Used to reconstruct method source code on demand without loading the
-        entire file blob into memory more than necessary.
+        The full blob is decompressed into memory before slicing; this is a
+        convenience wrapper around read() rather than a streaming reader.
         """
         content = self.read(sha256_hash)
         lines = content.decode("utf-8", errors="replace").splitlines()

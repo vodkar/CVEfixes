@@ -48,11 +48,16 @@ class CweClassification(BaseModel):
 
 
 class RepositoryRecord(BaseModel):
-    repo_id: int
-    url: str
-    primary_language: Optional[str] = None
-    stars: Optional[int] = None
-    created_at: Optional[datetime.date] = None
+    repo_url: str
+    repo_name: Optional[str] = None
+    description: Optional[str] = None
+    date_created: Optional[str] = None   # ISO date string from GitHub API
+    date_last_push: Optional[str] = None
+    homepage: Optional[str] = None
+    repo_language: Optional[str] = None
+    owner: Optional[str] = None
+    forks_count: Optional[int] = None
+    stars_count: Optional[int] = None
 
 
 class CommitRecord(BaseModel):
@@ -76,6 +81,7 @@ class CommitRecord(BaseModel):
 class FixRecord(BaseModel):
     cve_id: str
     hash: str
+    repo_url: Optional[str] = None
 
 
 class FileChangeRecord(BaseModel):
@@ -110,11 +116,13 @@ class MethodChangeRecord(BaseModel):
 # ---------------------------------------------------------------------------
 
 CVE_SCHEMA = pa.schema([
-    pa.field("cve_id",        pa.dictionary(pa.int32(), pa.string()), nullable=False),
-    pa.field("published_date", pa.date32()),
-    pa.field("severity_v2",   pa.float32()),
-    pa.field("severity_v3",   pa.float32()),
-    pa.field("description",   pa.string()),
+    pa.field("cve_id",           pa.dictionary(pa.int32(), pa.string()), nullable=False),
+    pa.field("published_date",   pa.date32()),
+    pa.field("severity_v2",      pa.float32()),
+    pa.field("severity_v3",      pa.float32()),
+    pa.field("description",      pa.string()),
+    pa.field("reference_json",   pa.large_utf8()),   # JSON array of reference objects
+    pa.field("problemtype_json", pa.large_utf8()),   # JSON array of problem-type objects
 ])
 
 CWE_SCHEMA = pa.schema([
@@ -132,11 +140,17 @@ CWE_CLASSIFICATION_SCHEMA = pa.schema([
 ])
 
 REPOSITORY_SCHEMA = pa.schema([
-    pa.field("repo_id",          pa.int32(), nullable=False),
-    pa.field("url",              pa.string()),
-    pa.field("primary_language", pa.dictionary(pa.int32(), pa.string())),
-    pa.field("stars",            pa.int32()),
-    pa.field("created_at",       pa.date32()),
+    pa.field("repo_id",       pa.int32(), nullable=False),  # assigned by writer
+    pa.field("repo_url",      pa.string(), nullable=False),
+    pa.field("repo_name",     pa.string()),
+    pa.field("description",   pa.string()),
+    pa.field("date_created",  pa.string()),
+    pa.field("date_last_push", pa.string()),
+    pa.field("homepage",      pa.string()),
+    pa.field("repo_language", pa.dictionary(pa.int32(), pa.string())),
+    pa.field("owner",         pa.string()),
+    pa.field("forks_count",   pa.int32()),
+    pa.field("stars_count",   pa.int32()),
 ])
 
 COMMITS_SCHEMA = pa.schema([
@@ -151,8 +165,9 @@ COMMITS_SCHEMA = pa.schema([
 ])
 
 FIXES_SCHEMA = pa.schema([
-    pa.field("cve_id", pa.dictionary(pa.int32(), pa.string()), nullable=False),
-    pa.field("hash",   pa.string(), nullable=False),
+    pa.field("cve_id",   pa.dictionary(pa.int32(), pa.string()), nullable=False),
+    pa.field("hash",     pa.string(), nullable=False),
+    pa.field("repo_url", pa.string()),
 ])
 
 FILE_CHANGE_SCHEMA = pa.schema([
