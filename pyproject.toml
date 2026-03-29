@@ -17,8 +17,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Language detection (requires TensorFlow — install separately)
-langdetect = ["guesslang>=2.0.3"]
+# Language detection — guesslang pins tensorflow==2.5.0 which has no py311
+# wheels; override to a compatible release via [tool.uv.override-dependencies].
+langdetect = ["guesslang>=2.2.0"]
 # Legacy SQLite-based pipeline
 legacy = [
     "pandas~=1.2.4",
@@ -26,12 +27,6 @@ legacy = [
     "jupyter",
     "seaborn",
     "matplotlib",
-]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "ruff>=0.4.0",
-    "mypy>=1.10.0",
 ]
 
 [project.scripts]
@@ -41,7 +36,14 @@ cvefixes-collect = "collect:main"
 # uv
 # ---------------------------------------------------------------------------
 [tool.uv]
-dev-dependencies = [
+# guesslang 2.2.x declares tensorflow==2.5.0 which has no py311 wheels.
+# Override to the latest 2.x release that supports Python 3.11+.
+override-dependencies = [
+    "tensorflow>=2.13.0",
+]
+
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.4.0",
