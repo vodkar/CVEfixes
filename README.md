@@ -71,6 +71,134 @@ dataset has been released on Zenodo with DOI:
 [10.5281/zenodo.4476563](https://doi.org/10.5281/zenodo.4476563). 
 
 
+## Collecting the dataset (Parquet/DuckDB backend)
+
+The new collection pipeline replaces the original SQLite backend with
+columnar Parquet files and a DuckDB catalog.  Source code snapshots are
+stored in a content-addressable blob store (SHA-256 keyed, zstd-19
+compressed) so identical files across thousands of CVEs are stored only
+once.
+
+### Prerequisites
+
+```
+pip install -r requirements.txt   # or: pip install polars pyarrow duckdb zstandard pydriller requests
+```
+
+Create a `.CVEfixes.ini` configuration file (see `INSTALL.md` for details
+and `example.CVEfixes.ini` for a template):
+
+```ini
+[CVEfixes]
+database_path = Data          ; raw NVD/CWE JSON cache
+parquet_path  = parquet       ; output directory
+duckdb_path   = cvefixes.duckdb
+num_workers   = 4
+logging_level = INFO
+
+[GitHub]
+user  = your_github_username
+token = ghp_your_personal_access_token
+```
+
+A GitHub token is strongly recommended — without one the GitHub API is
+rate-limited to ~25 requests per hour, which is not enough for a full
+collection.
+
+### Running a full collection
+
+```console
+python collect.py
+```
+
+The process downloads NVD feeds (2002–present), traverses all referenced
+git repositories, and writes Parquet + DuckDB files under `parquet/`.
+
+**Resuming after a failure** — the script writes a checkpoint file
+(`parquet/collection_state.json`) after each major step.  If the process
+is interrupted for any reason, just re-run the same command and it will
+pick up from where it left off:
+
+```console
+python collect.py          # interrupted, e.g. by a network error
+# ... fix the issue ...
+python collect.py          # resumes automatically from last checkpoint
+```
+
+To force a completely clean restart (discards checkpoint and staging files):
+
+```console
+python collect.py --reset
+python collect.py
+```
+
+### Other modes
+
+```console
+# Quick smoke test: current-year CVEs, 25 commits, ~10-15 minutes
+python collect.py --sample
+
+# Incremental weekly update (new CVEs only, rewrites only affected partitions)
+python collect.py --update
+
+# Rebuild the DuckDB catalog without re-collecting (e.g. after manual edits)
+python collect.py --catalog-only
+```
+
+### Output layout
+
+```
+parquet/
+  collection_state.json     ← checkpoint (deleted on success)
+  metadata/
+    cve.parquet             ← sorted by published_date
+    fixes.parquet
+    cwe.parquet
+    cwe_classification.parquet
+    repository.parquet
+    commits.parquet
+  file_change/
+    language=C/data.parquet
+    language=Python/data.parquet
+    …                       ← hive-partitioned by programming language
+  method_change/
+    language=C/data.parquet
+    …
+  blobs/
+    ab/cdef….zst            ← content-addressable source code (SHA-256, zstd-19)
+cvefixes.duckdb             ← DuckDB views over all Parquet files
+```
+
+### Querying with DuckDB
+
+```python
+import duckdb
+
+con = duckdb.connect("cvefixes.duckdb")
+
+# All Python file changes with their CVE IDs
+con.sql("""
+    SELECT f.cve_id, fc.filename, fc.num_lines_added, fc.num_lines_deleted
+    FROM fixes f
+    JOIN file_change fc ON f.hash = fc.hash
+    WHERE fc.programming_language = 'Python'
+    LIMIT 10
+""").show()
+```
+
+### Estimated resource requirements (full dataset)
+
+| Resource | Estimate |
+|----------|----------|
+| Disk (raw NVD JSON cache) | ~8 GB |
+| Disk (blob store, zstd-19) | ~150–200 GB |
+| Disk (Parquet files) | ~2–5 GB |
+| RAM | 8 GB minimum, 16 GB recommended |
+| CPU | 4+ cores (set `num_workers` accordingly) |
+| Time | 24–48 h on a modern machine with a fast connection |
+
+---
+
 ## Acknowledgement
 
 This work has been financially supported by the Research Council of

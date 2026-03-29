@@ -3,14 +3,17 @@
 CVEfixes collection entry point — Parquet/DuckDB backend.
 
 Usage:
-    # Full collection from scratch
+    # Full collection (auto-resumes after failure via checkpoint file)
     python collect.py
 
     # Sample collection (fast, current year only, 25 CVEs)
     python collect.py --sample
 
-    # Weekly incremental update
+    # Weekly incremental update (new CVEs only)
     python collect.py --update
+
+    # Force a clean restart — discards checkpoint and staging files
+    python collect.py --reset
 
     # Just rebuild the DuckDB catalog (e.g. after manual Parquet edits)
     python collect.py --catalog-only
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from configparser import ConfigParser
 from pathlib import Path
@@ -81,6 +85,8 @@ def main() -> None:
                       help="Incremental weekly update (new CVEs only)")
     mode.add_argument("--catalog-only", action="store_true",
                       help="Rebuild DuckDB catalog without re-collecting")
+    mode.add_argument("--reset",        action="store_true",
+                      help="Clear checkpoint + staging files and restart from scratch")
     parser.add_argument("--parquet-base", default=None,
                         help="Override parquet base directory")
     parser.add_argument("--duckdb-path",  default=None,
@@ -97,6 +103,23 @@ def main() -> None:
     github_token = config.get("github_token")
     num_workers  = config.get("num_workers", 4)
     sample_limit = 25 if args.sample else config.get("sample_limit", 0)
+
+    if args.reset:
+        checkpoint = Path(parquet_base) / "collection_state.json"
+        staging_dir = Path(parquet_base) / "staging"
+        removed: list[str] = []
+        if checkpoint.exists():
+            checkpoint.unlink()
+            removed.append("collection_state.json")
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+            removed.append("staging/")
+        if removed:
+            logging.info("Reset: removed %s", ", ".join(removed))
+        else:
+            logging.info("Reset: nothing to remove (already clean)")
+        logging.info("Ready for a fresh collection run.  Re-run without --reset to start.")
+        return
 
     if args.catalog_only:
         from storage.catalog import build_catalog
