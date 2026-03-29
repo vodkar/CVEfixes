@@ -58,7 +58,6 @@ def load_config() -> dict:
         "logging_level":  cfg.get("CVEfixes", "logging_level", fallback="INFO"),
         "github_user":    cfg.get("GitHub", "user",  fallback=None),
         "github_token":   cfg.get("GitHub", "token", fallback=None),
-        "nvd_api_key":    cfg.get("NVD", "api_key", fallback=None),
     }
 
 
@@ -102,7 +101,6 @@ def main() -> None:
     data_path    = config.get("data_path", "Data")
     github_user  = config.get("github_user")
     github_token = config.get("github_token")
-    nvd_api_key  = config.get("nvd_api_key")
     num_workers  = config.get("num_workers", 4)
     sample_limit = 25 if args.sample else config.get("sample_limit", 0)
 
@@ -139,7 +137,6 @@ def main() -> None:
             duckdb_path=duckdb_path,
             github_user=github_user,
             github_token=github_token,
-            nvd_api_key=nvd_api_key,
             sample_limit=sample_limit,
             num_workers=num_workers,
         )
@@ -151,7 +148,6 @@ def main() -> None:
             duckdb_path=duckdb_path,
             github_user=github_user,
             github_token=github_token,
-            nvd_api_key=nvd_api_key,
             sample_limit=sample_limit,
             num_workers=num_workers,
         )

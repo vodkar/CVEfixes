@@ -108,7 +108,6 @@ def run_weekly_update(
     duckdb_path: str | Path = "cvefixes.duckdb",
     github_user: str | None = None,
     github_token: str | None = None,
-    nvd_api_key: str | None = None,
     sample_limit: int = 0,
     num_workers: int = 4,
 ) -> None:
@@ -136,7 +135,6 @@ def run_weekly_update(
         data_path=data_path,
         staging_path=parquet_base / "staging",
         sample_limit=sample_limit,
-        nvd_api_key=nvd_api_key,
     )
     if df_cve is None or len(df_cve) == 0:
         logger.warning("No CVEs downloaded — aborting update")
@@ -266,7 +264,6 @@ def run_full_collection(
     duckdb_path: str | Path = "cvefixes.duckdb",
     github_user: str | None = None,
     github_token: str | None = None,
-    nvd_api_key: str | None = None,
     sample_limit: int = 0,
     num_workers: int = 4,
 ) -> None:
@@ -313,7 +310,6 @@ def run_full_collection(
             data_path=data_path,
             staging_path=staging_path,
             sample_limit=sample_limit,
-            nvd_api_key=nvd_api_key,
         )
         state.mark_done("cve_import")
 

@@ -1,19 +1,19 @@
 """
-NVD CVE importer — uses NVD REST API 2.0 (replaces retired 1.1 JSON feeds).
+NVD CVE importer — downloads NVD JSON 2.0 feeds and writes staging Parquets.
 
-The legacy feeds at nvd.nist.gov/feeds/json/cve/1.1/ were retired on
-December 15 2023 and now return HTTP 403.  This module uses the current
-REST API at services.nvd.nist.gov/rest/json/cves/2.0.
+Feed URL: https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{year}.json.zip
 
-API key
--------
-Register for a free key at https://nvd.nist.gov/developers/request-an-api-key
-and add it to your .CVEfixes.ini::
+The legacy 1.1 feeds (nvdcve-1.1-{year}.json.zip) were retired on
+2023-12-15 and return HTTP 403.  The 2.0 feeds use the same zip-per-year
+layout but a different JSON schema:
 
-    [NVD]
-    api_key = <your-key>
-
-Without a key the API allows 5 requests / 30 s.  With a key: 50 / 30 s.
+    {
+        "vulnerabilities": [
+            {"cve": {"id": "CVE-...", "published": "...", "metrics": {...},
+                     "weaknesses": [...], "references": [...], ...}},
+            ...
+        ]
+    }
 
 Output: parquet/staging/cve_staging.parquet
         parquet/staging/fixes_staging.parquet  (repo commit links)
@@ -25,25 +25,19 @@ import datetime
 import json
 import logging
 import re
-import time
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import polars as pl
 import requests
 
 logger = logging.getLogger("cvefixes.nvd_importer")
 
-NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-RESULTS_PER_PAGE = 2000
+NVD_FEED_URL = "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-"
+NVD_FEED_EXT = ".json.zip"
 INIT_YEAR = 2002
-
-# Delay between API requests to stay within rate limits.
-# NVD recommends sleeping ≥6 s between requests without a key,
-# and ≥0.6 s with a key.  We use 6 s for the no-key path and
-# 0.7 s with a key (a small buffer above the minimum).
-_SLEEP_NO_KEY = 6.0
-_SLEEP_WITH_KEY = 0.7
 
 GIT_COMMIT_RE = re.compile(
     r"(((?P<repo>(https|http)://(bitbucket|github|gitlab)\.(org|com)/(?P<owner>[^/]+)/(?P<project>[^/]*))"
@@ -52,80 +46,34 @@ GIT_COMMIT_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Low-level API fetching
+# Download and cache
 # ---------------------------------------------------------------------------
 
-def _build_headers(api_key: str | None) -> dict[str, str]:
-    if api_key:
-        return {"apiKey": api_key}
-    return {}
-
-
-def _fetch_page(
-    start_index: int,
-    pub_start: str,
-    pub_end: str,
-    api_key: str | None,
-    session: requests.Session,
-) -> dict:
-    """Fetch one page of results from the NVD 2.0 API."""
-    params: dict[str, Any] = {
-        "pubStartDate": pub_start,
-        "pubEndDate": pub_end,
-        "resultsPerPage": RESULTS_PER_PAGE,
-        "startIndex": start_index,
-    }
-    resp = session.get(
-        NVD_API_URL,
-        params=params,
-        headers=_build_headers(api_key),
-        timeout=60,
-    )
+def _download_year(year: int, json_dir: Path) -> Path:
+    target_name = f"nvdcve-2.0-{year}.json"
+    target_path = json_dir / target_name
+    if target_path.exists():
+        logger.info("Reusing cached NVD 2.0 JSON for %s", year)
+        return target_path
+    url = f"{NVD_FEED_URL}{year}{NVD_FEED_EXT}"
+    logger.info("Downloading NVD 2.0 JSON for %s …", year)
+    resp = requests.get(url, timeout=60)
     resp.raise_for_status()
-    return resp.json()
+    z = ZipFile(BytesIO(resp.content))
+    z.extract(target_name, json_dir)
+    return target_path
 
 
-def _download_year(year: int, json_dir: Path, api_key: str | None) -> list[dict]:
-    """
-    Return all CVE vulnerability objects for *year*.
-
-    Results are cached as ``{json_dir}/nvdcve-2.0-{year}.json`` so
-    repeated runs don't re-download the same data.
-    """
-    cache_path = json_dir / f"nvdcve-2.0-{year}.json"
-    if cache_path.exists():
-        logger.info("Reusing cached NVD API 2.0 data for %s", year)
-        return json.loads(cache_path.read_text())
-
-    logger.info("Downloading NVD API 2.0 data for %s …", year)
-    pub_start = f"{year}-01-01T00:00:00.000"
-    pub_end   = f"{year}-12-31T23:59:59.999"
-    sleep_s   = _SLEEP_WITH_KEY if api_key else _SLEEP_NO_KEY
-
-    all_vulns: list[dict] = []
-    start_index = 0
-    session = requests.Session()
-
-    while True:
-        data = _fetch_page(start_index, pub_start, pub_end, api_key, session)
-        vulns = data.get("vulnerabilities", [])
-        all_vulns.extend(vulns)
-        total = data.get("totalResults", 0)
-        start_index += len(vulns)
-        logger.debug(
-            "Year %d: fetched %d/%d CVEs (startIndex=%d)",
-            year, len(all_vulns), total, start_index,
-        )
-        if start_index >= total or not vulns:
-            break
-        time.sleep(sleep_s)
-
-    cache_path.write_text(json.dumps(all_vulns))
-    return all_vulns
+def _load_year(path: Path) -> list[dict]:
+    with open(path) as fh:
+        data = json.load(fh)
+    if "vulnerabilities" not in data:
+        raise KeyError(f"'vulnerabilities' key missing in NVD 2.0 JSON file: {path}")
+    return data["vulnerabilities"]
 
 
 # ---------------------------------------------------------------------------
-# Flattening API 2.0 response into row dicts
+# Flattening NVD 2.0 schema into row dicts
 # ---------------------------------------------------------------------------
 
 def _get_score_v2(metrics: dict) -> float | None:
@@ -147,7 +95,7 @@ def _get_score_v3(metrics: dict) -> float | None:
 
 def _weaknesses_to_problemtype_json(weaknesses: list[dict]) -> str:
     """
-    Convert API 2.0 ``weaknesses`` to the legacy problemtype_json format
+    Convert NVD 2.0 ``weaknesses`` to the legacy problemtype_json format
     expected by cwe_importer._extract_cwe_ids_from_problemtype:
 
         [{"description": [{"value": "CWE-xxx"}]}, ...]
@@ -212,7 +160,7 @@ def _flatten_vulns(vulns: list[dict]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Fix extraction (unchanged — parses reference_json for git commit URLs)
+# Fix extraction (parses reference_json for git commit URLs)
 # ---------------------------------------------------------------------------
 
 def _extract_fixes(df_cve: pl.DataFrame) -> pl.DataFrame:
@@ -247,10 +195,9 @@ def import_cves(
     data_path: str | Path,
     staging_path: str | Path,
     sample_limit: int = 0,
-    nvd_api_key: str | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
-    Download CVEs from the NVD REST API 2.0, flatten, and write staging Parquets.
+    Download NVD 2.0 JSON feeds, flatten, and write staging Parquets.
 
     Returns (df_cve, df_fixes) Polars DataFrames.
 
@@ -259,7 +206,6 @@ def import_cves(
     data_path:    directory for raw JSON cache
     staging_path: directory for output Parquet files
     sample_limit: if > 0, only collect current-year CVEs (for fast tests)
-    nvd_api_key:  optional NVD API key (raises rate limit from 5 to 50 req/30s)
     """
     data_path = Path(data_path)
     staging_path = Path(staging_path)
@@ -272,7 +218,8 @@ def import_cves(
 
     all_rows: list[dict] = []
     for year in range(init_year, current_year + 1):
-        vulns = _download_year(year, json_dir, nvd_api_key)
+        path = _download_year(year, json_dir)
+        vulns = _load_year(path)
         rows = _flatten_vulns(vulns)
         all_rows.extend(rows)
         logger.info("Year %d: %d CVE items loaded", year, len(rows))
