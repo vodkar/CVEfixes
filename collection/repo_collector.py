@@ -5,7 +5,7 @@ repo availability.
 Replaces the relevant parts of Code/collect_projects.py.
 """
 
-from __future__ import annotations
+
 
 import logging
 import time

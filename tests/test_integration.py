@@ -6,7 +6,7 @@ These tests use mocked/synthetic data to verify the end-to-end pipeline
 produces the correct Parquet files and DuckDB views.
 """
 
-from __future__ import annotations
+
 
 import datetime
 import json

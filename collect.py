@@ -19,7 +19,7 @@ Usage:
     python collect.py --catalog-only
 """
 
-from __future__ import annotations
+
 
 import argparse
 import logging

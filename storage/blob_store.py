@@ -10,7 +10,7 @@ Key properties:
 - Compressed: zstandard level 19 on write, transparent on read
 """
 
-from __future__ import annotations
+
 
 import hashlib
 from pathlib import Path

@@ -8,7 +8,7 @@ Outputs:
     parquet/staging/cwe_classification_staging.parquet
 """
 
-from __future__ import annotations
+
 
 import fnmatch
 import json

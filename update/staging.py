@@ -15,7 +15,7 @@ Both layouts are readable by load() and the writer.  append() uses the
 multi-file layout so each call is O(1) — no read+rewrite of existing data.
 """
 
-from __future__ import annotations
+
 
 import logging
 import time

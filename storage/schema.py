@@ -5,7 +5,7 @@ Pydantic models validate data at collection time.
 Arrow schemas define the on-disk column types written to Parquet.
 """
 
-from __future__ import annotations
+
 
 import datetime
 from typing import Optional

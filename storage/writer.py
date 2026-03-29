@@ -12,7 +12,7 @@ This module converts them to the final layout:
 After a successful finalization the staging directory is cleared.
 """
 
-from __future__ import annotations
+
 
 import logging
 import shutil

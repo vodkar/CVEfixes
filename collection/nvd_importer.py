@@ -7,7 +7,7 @@ Output: parquet/staging/cve_staging.parquet
         parquet/staging/fixes_staging.parquet  (repo commit links)
 """
 
-from __future__ import annotations
+
 
 import datetime
 import json

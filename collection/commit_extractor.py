@@ -10,7 +10,7 @@ Key differences from the original Code/collect_commits.py:
 - Output goes to staging Parquet, not SQLite
 """
 
-from __future__ import annotations
+
 
 import logging
 import re
