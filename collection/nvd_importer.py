@@ -51,7 +51,9 @@ def _download_year(year: int, json_dir: Path) -> Path:
 def _load_year(path: Path) -> list[dict]:
     with open(path) as fh:
         data = json.load(fh)
-    return data.get("CVE_Items", [])
+    if "CVE_Items" not in data:
+        raise KeyError(f"'CVE_Items' key missing in NVD JSON file: {path}")
+    return data["CVE_Items"]
 
 
 def _flatten_items(items: list[dict]) -> list[dict[str, Any]]:

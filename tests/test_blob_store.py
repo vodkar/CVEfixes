@@ -19,7 +19,7 @@ from storage.blob_store import BlobStore
 
 @pytest.fixture
 def store(tmp_path):
-    return BlobStore(tmp_path / "blobs")
+    return BlobStore(root=tmp_path / "blobs")
 
 
 def test_write_returns_hex_digest(store):

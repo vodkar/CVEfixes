@@ -10,26 +10,33 @@ Key properties:
 - Compressed: zstandard level 19 on write, transparent on read
 """
 
-
+from __future__ import annotations
 
 import hashlib
 from pathlib import Path
 
 import zstandard as zstd
+from pydantic import BaseModel, PrivateAttr, model_validator
 
 
 _ZSTD_LEVEL = 19
 _ZSTD_READ_THREADS = 0  # 0 = single-threaded (safe for random access)
 
 
-class BlobStore:
+class BlobStore(BaseModel):
     """Content-addressable store backed by the local filesystem."""
 
-    def __init__(self, root: str | Path) -> None:
-        self.root = Path(root)
+    root: Path
+
+    _compressor: zstd.ZstdCompressor = PrivateAttr()
+    _decompressor: zstd.ZstdDecompressor = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _init_store(self) -> BlobStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self._compressor = zstd.ZstdCompressor(level=_ZSTD_LEVEL)
         self._decompressor = zstd.ZstdDecompressor()
+        return self
 
     # ------------------------------------------------------------------
     # Public API

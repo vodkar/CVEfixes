@@ -122,7 +122,7 @@ def run_weekly_update(
     parquet_base = Path(parquet_base)
     blob_root = parquet_base / "blobs"
 
-    blob_store = BlobStore(blob_root)
+    blob_store = BlobStore(root=blob_root)
     staging_base = parquet_base
 
     logger.info("=== CVEfixes weekly update started ===")
@@ -288,7 +288,7 @@ def run_full_collection(
     data_path = Path(data_path)
     parquet_base = Path(parquet_base)
     blob_root = parquet_base / "blobs"
-    blob_store = BlobStore(blob_root)
+    blob_store = BlobStore(root=blob_root)
     staging_path = parquet_base / "staging"
 
     state = _CollectionState(parquet_base / "collection_state.json")

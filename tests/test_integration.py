@@ -109,10 +109,14 @@ def _build_synthetic_staging(parquet_base: Path) -> None:
 
     _write_staging(parquet_base, "method_change", [
         {"method_change_id": 101, "file_change_id": 1, "name": "parse_input",
-         "signature": "void parse_input(char*)", "start_line": 10, "end_line": 25,
+         "signature": "void parse_input(char*)",
+         "code": "void parse_input(char* input) { /* ... */ }",
+         "start_line": 10, "end_line": 25,
          "before_change": True, "cyclomatic_complexity": 5, "nloc": 15, "token_count": 40},
         {"method_change_id": 102, "file_change_id": 2, "name": "run_query",
-         "signature": "run_query(sql)", "start_line": 5, "end_line": 18,
+         "signature": "run_query(sql)",
+         "code": "def run_query(sql): pass",
+         "start_line": 5, "end_line": 18,
          "before_change": True, "cyclomatic_complexity": 3, "nloc": 13, "token_count": 35},
     ])
 
@@ -208,7 +212,7 @@ class TestEndToEndPipeline:
 class TestBlobStoreIntegration:
     def test_code_before_reconstructable(self, tmp_path):
         """Write source code to blob store, verify method lines are recoverable."""
-        store = BlobStore(tmp_path / "blobs")
+        store = BlobStore(root=tmp_path / "blobs")
         source = "\n".join([f"line {i}" for i in range(1, 21)])  # 20 lines
         digest = store.write(source.encode())
 
@@ -219,7 +223,7 @@ class TestBlobStoreIntegration:
 
     def test_dedup_across_multiple_cves(self, tmp_path):
         """Same file touched by multiple CVEs should be stored only once."""
-        store = BlobStore(tmp_path / "blobs")
+        store = BlobStore(root=tmp_path / "blobs")
         shared_source = b"int main() { return 0; }"
 
         hashes = [store.write(shared_source) for _ in range(10)]
@@ -228,7 +232,7 @@ class TestBlobStoreIntegration:
 
     def test_code_before_and_after_stored_separately(self, tmp_path):
         """code_before and code_after should produce distinct blob hashes."""
-        store = BlobStore(tmp_path / "blobs")
+        store = BlobStore(root=tmp_path / "blobs")
         before_src = b"int vuln() { strcpy(buf, input); }"
         after_src = b"int vuln() { strncpy(buf, input, sizeof(buf) - 1); }"
 

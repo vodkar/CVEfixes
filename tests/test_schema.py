@@ -143,11 +143,15 @@ class TestArrowSchemas:
         assert pa.types.is_string(fields["code_before_hash"].type)
         assert pa.types.is_string(fields["code_after_hash"].type)
 
-    def test_method_change_no_code_column(self):
+    def test_method_change_has_code_column(self):
         names = {f.name for f in METHOD_CHANGE_SCHEMA}
-        assert "code" not in names
+        assert "code" in names
         assert "start_line" in names
         assert "end_line" in names
+
+    def test_method_change_code_is_large_utf8(self):
+        field = next(f for f in METHOD_CHANGE_SCHEMA if f.name == "code")
+        assert pa.types.is_large_unicode(field.type)
 
     def test_file_change_diff_is_large_binary(self):
         field = next(f for f in FILE_CHANGE_SCHEMA if f.name == "diff")

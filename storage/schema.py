@@ -103,6 +103,7 @@ class MethodChangeRecord(BaseModel):
     file_change_id: int
     name: Optional[str] = None
     signature: Optional[str] = None
+    code: Optional[str] = None          # reconstructed source code of the method
     start_line: Optional[int] = None
     end_line: Optional[int] = None
     before_change: bool = False
@@ -189,6 +190,7 @@ METHOD_CHANGE_SCHEMA = pa.schema([
     pa.field("file_change_id",        pa.int64()),
     pa.field("name",                  pa.string()),
     pa.field("signature",             pa.string()),
+    pa.field("code",                  pa.large_utf8()),   # reconstructed method source
     pa.field("start_line",            pa.int32()),
     pa.field("end_line",              pa.int32()),
     pa.field("before_change",         pa.bool_()),

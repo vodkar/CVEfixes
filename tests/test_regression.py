@@ -89,7 +89,7 @@ class TestNoExistingRowsMutated:
 
 class TestBlobStoreDedup:
     def test_dedup_ratio_tracked(self, tmp_path):
-        store = BlobStore(tmp_path / "blobs")
+        store = BlobStore(root=tmp_path / "blobs")
 
         # Write 10 blobs, 5 unique
         unique_content = [f"content_{i}".encode() for i in range(5)]

@@ -8,7 +8,7 @@ Outputs:
     parquet/staging/cwe_classification_staging.parquet
 """
 
-
+from __future__ import annotations
 
 import fnmatch
 import json
@@ -126,9 +126,9 @@ def _extract_cwe_ids_from_problemtype(problemtype_json_list: list[str]) -> list[
 def import_cwes(
     data_path: str | Path,
     staging_path: str | Path,
-    df_cve: "pl.DataFrame | None" = None,
-    cve_staging_path: "str | Path | None" = None,
-) -> tuple["pl.DataFrame", "pl.DataFrame"]:
+    df_cve: pl.DataFrame | None = None,
+    cve_staging_path: str | Path | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Download CWE XML and build CWE + cwe_classification staging Parquets.
 
