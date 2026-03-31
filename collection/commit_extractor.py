@@ -239,24 +239,29 @@ def run_collection(
     """
     For each unique repo in *df_fixes*, extract commits and write staging Parquets.
 
+    Rows are flushed to disk after each repository so memory usage stays
+    proportional to the largest single repo, not to the total dataset.
+
     Parameters
     ----------
     df_fixes:            DataFrame with columns cve_id, hash, repo_url
     blob_store:          BlobStore instance
     staging_path:        directory to write staging Parquet files
+                         (part files written via stg.append)
     num_workers:         PyDriller parallelism
     already_done_hashes: hashes already present in staging (incremental update)
     """
+    from update import staging as stg
+
     staging_path = Path(staging_path)
     staging_path.mkdir(parents=True, exist_ok=True)
+    # stg.append() takes the parquet base (parent of staging/)
+    parquet_base = staging_path.parent
 
     if already_done_hashes:
         df_fixes = df_fixes.filter(~pl.col("hash").is_in(list(already_done_hashes)))
 
     repo_urls = df_fixes["repo_url"].unique().to_list()
-    all_commits: list[dict] = []
-    all_files: list[dict] = []
-    all_methods: list[dict] = []
 
     for idx, repo_url in enumerate(repo_urls, 1):
         hashes = (
@@ -271,25 +276,15 @@ def run_collection(
         )
         try:
             cr, fr, mr = extract_commits(repo_url, hashes, blob_store, num_workers)
-            all_commits.extend(cr)
-            all_files.extend(fr)
-            all_methods.extend(mr)
         except Exception as exc:
             logger.warning("Skipping repo %s: %s", repo_url, exc)
+            continue
 
-    def _write(rows: list[dict], name: str) -> None:
-        if not rows:
-            logger.info("No rows for %s — skipping write", name)
-            return
-        out = staging_path / f"{name}_staging.parquet"
-        # Append to existing staging if present
-        df_new = pl.DataFrame(rows)
-        if out.exists():
-            df_existing = pl.read_parquet(out)
-            df_new = pl.concat([df_existing, df_new])
-        df_new.write_parquet(out, compression="zstd")
-        logger.info("Wrote %d rows to %s", len(df_new), out)
-
-    _write(all_commits, "commits")
-    _write(all_files, "file_change")
-    _write(all_methods, "method_change")
+        # Flush each repo's rows to a part file immediately — never accumulate
+        # across repos so peak memory is proportional to the largest single repo.
+        if cr:
+            stg.append(pl.DataFrame(cr), parquet_base, "commits")
+        if fr:
+            stg.append(pl.DataFrame(fr), parquet_base, "file_change")
+        if mr:
+            stg.append(pl.DataFrame(mr), parquet_base, "method_change")
