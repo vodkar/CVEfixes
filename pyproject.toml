@@ -1,0 +1,109 @@
+[project]
+name = "cvefixes"
+version = "2.0.0"
+description = "Automated collection of vulnerabilities and their fixes from open-source software (Parquet/DuckDB backend)"
+requires-python = ">=3.11"
+dependencies = [
+    # Core collection
+    "requests>=2.24",
+    "pydriller>=2.0",
+    "PyGithub>=1.54",
+    # Storage layer
+    "polars>=0.20.0",
+    "pyarrow>=14.0.0",
+    "duckdb>=0.10.0",
+    "zstandard>=0.22.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+# Language detection — guesslang pins an old tensorflow; the override below
+# forces a Python 3.11-compatible release.
+langdetect = ["guesslang>=2.2.0"]
+
+[project.scripts]
+cvefixes-collect = "collect:main"
+
+# ---------------------------------------------------------------------------
+# uv
+# ---------------------------------------------------------------------------
+[tool.uv]
+# guesslang 2.2.x requires tensorflow>=2.13.0 which it inherits from its
+# own dep tree.  Force 2.20+ which has Python 3.11 wheels and a stable
+# numpy>=2.0 requirement that does not conflict with the main stack.
+override-dependencies = [
+    "tensorflow>=2.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+
+# ---------------------------------------------------------------------------
+# ruff — formatter + linter
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function calls in default args
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy code — don't enforce new rules on old files
+"Code/**" = ["ALL"]
+"tests/legacy/**" = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# mypy — non-strict, only for new files (collection/, storage/, update/)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pydriller.*",
+    "guesslang.*",
+    "tensorflow.*",
+    "github.*",
+    "zstandard.*",
+    "duckdb.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Legacy code is excluded from type checking
+module = ["Code.*"]
+ignore_errors = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

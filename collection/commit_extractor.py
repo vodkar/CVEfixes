@@ -1,0 +1,290 @@
+"""
+Commit extractor — traverses git repositories with PyDriller and writes
+staging Parquet files for commits, file_change, and method_change.
+
+Key differences from the original Code/collect_commits.py:
+- code_before and code_after are both written to the blob store; only their
+  SHA-256 hashes are stored in the file_change table
+- method_change stores start_line/end_line and reconstructed source code
+- Only before_change=True method rows are written
+- Output goes to staging Parquet, not SQLite
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import polars as pl
+import zstandard as zstd
+
+from storage.blob_store import BlobStore
+
+if TYPE_CHECKING:
+    from pydriller import Commit, ModifiedFile
+    from pydriller.domain.commit import Method
+
+# Suppress TensorFlow startup noise before any guesslang import
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+try:
+    from guesslang import Guess as _Guess
+    _GUESSLANG_AVAILABLE = True
+except ImportError:
+    _Guess = None  # type: ignore[assignment]
+    _GUESSLANG_AVAILABLE = False
+
+try:
+    from pydriller import Repository as _Repository
+except ImportError:
+    _Repository = None  # type: ignore[assignment]
+
+logger = logging.getLogger("cvefixes.commit_extractor")
+
+_ZSTD_DIFF_LEVEL = 3  # lighter compression for inline diff column
+
+GIT_COMMIT_RE = re.compile(
+    r"(((?P<repo>(https|http)://(bitbucket|github|gitlab)\.(org|com)/(?P<owner>[^/]+)/(?P<project>[^/]*))"
+    r"/(commit|commits)/(?P<hash>\w+)#?)+)"
+)
+
+
+def _guess_language(code: str | None) -> str | None:
+    """Detect programming language using guesslang (TF-backed)."""
+    if not code or not _GUESSLANG_AVAILABLE:
+        return None
+    return _Guess().language_name(code.strip())
+
+
+def _changed_methods_both(file: ModifiedFile) -> tuple[set[Method], set[Method]]:
+    """Return (methods_in_new_version, methods_in_old_version) that were touched."""
+    new_methods = file.methods or []
+    old_methods = file.methods_before or []
+    added = (file.diff_parsed or {}).get("added", [])
+    deleted = (file.diff_parsed or {}).get("deleted", [])
+
+    methods_new: set[Method] = {
+        m for x in added for m in new_methods
+        if m.start_line <= x[0] <= m.end_line
+    }
+    methods_old: set[Method] = {
+        m for x in deleted for m in old_methods
+        if m.start_line <= x[0] <= m.end_line
+    }
+    return methods_new, methods_old
+
+
+def _compress_diff(diff: str | None) -> bytes | None:
+    if not diff:
+        return None
+    cctx = zstd.ZstdCompressor(level=_ZSTD_DIFF_LEVEL)
+    return cctx.compress(diff.encode("utf-8", errors="replace"))
+
+
+def _extract_method_code(source: str, start_line: int, end_line: int) -> str:
+    """Extract lines [start_line, end_line] (1-based, inclusive) from *source*."""
+    lines = source.splitlines()
+    return "\n".join(lines[start_line - 1 : end_line])
+
+
+def _get_method_rows(file: ModifiedFile, file_change_id: int) -> list[dict]:
+    """
+    Extract method_change rows for *file*.
+
+    Only before_change rows are stored (pre-fix state), including the
+    reconstructed source code as in the original CVEfixes schema.
+    """
+    rows: list[dict] = []
+    if not file.changed_methods:
+        return rows
+    _, methods_before = _changed_methods_both(file)
+    if not methods_before or file.source_code_before is None:
+        return rows
+    for mb in methods_before:
+        if mb.name == "(anonymous)" or not mb.name:
+            continue
+        code = _extract_method_code(file.source_code_before, mb.start_line, mb.end_line)
+        rows.append({
+            # Mask to 63 bits so the value fits in Parquet int64 (always positive)
+            "method_change_id": uuid.uuid4().int & 0x7FFFFFFFFFFFFFFF,
+            "file_change_id": file_change_id,
+            "name": mb.name,
+            "signature": mb.long_name,
+            "code": code,
+            "start_line": mb.start_line,
+            "end_line": mb.end_line,
+            "before_change": True,
+            "cyclomatic_complexity": mb.complexity,
+            "nloc": mb.nloc,
+            "token_count": mb.token_count,
+        })
+    return rows
+
+
+def _get_file_rows(
+    commit: Commit,
+    blob_store: BlobStore,
+) -> tuple[list[dict], list[dict]]:
+    """Return (file_change_rows, method_change_rows) for one commit."""
+    file_rows: list[dict] = []
+    method_rows: list[dict] = []
+
+    if not commit.modified_files:
+        return file_rows, method_rows
+
+    for file in commit.modified_files:
+        try:
+            prog_lang = _guess_language(file.source_code)
+            # Mask to 63 bits so the value fits in Parquet int64 (always positive)
+            file_change_id = uuid.uuid4().int & 0x7FFFFFFFFFFFFFFF
+
+            # Store code_before and code_after in blob store; keep only hashes
+            code_before_hash: str | None = None
+            if file.source_code_before is not None:
+                raw = file.source_code_before.encode("utf-8", errors="replace")
+                code_before_hash = blob_store.write(raw)
+
+            code_after_hash: str | None = None
+            if file.source_code is not None:
+                raw = file.source_code.encode("utf-8", errors="replace")
+                code_after_hash = blob_store.write(raw)
+
+            file_rows.append({
+                "file_change_id": file_change_id,
+                "hash": commit.hash,
+                "filename": file.filename,
+                "programming_language": prog_lang,
+                "num_lines_added": file.added_lines,
+                "num_lines_deleted": file.deleted_lines,
+                "code_before_hash": code_before_hash,
+                "code_after_hash": code_after_hash,
+                "diff": _compress_diff(file.diff),
+                "nloc": file.nloc,
+                "complexity": file.complexity,
+            })
+
+            meths = _get_method_rows(file, file_change_id)
+            method_rows.extend(meths)
+        except Exception as exc:
+            logger.warning("Error processing file %s in %s: %s", file.filename, commit.hash, exc)
+
+    return file_rows, method_rows
+
+
+def extract_commits(
+    repo_url: str,
+    hashes: list[str],
+    blob_store: BlobStore,
+    num_workers: int = 4,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """
+    Traverse *repo_url* for the given *hashes* and return
+    (commit_rows, file_rows, method_rows).
+    """
+    if _Repository is None:
+        raise RuntimeError(
+            "pydriller is not installed; run: pip install pydriller"
+        )
+
+    if "github" in repo_url and not repo_url.endswith(".git"):
+        repo_url = repo_url + ".git"
+
+    commit_rows: list[dict] = []
+    file_rows: list[dict] = []
+    method_rows: list[dict] = []
+
+    single_hash = hashes[0] if len(hashes) == 1 else None
+    only_commits = None if single_hash else hashes
+
+    try:
+        for commit in _Repository(
+            path_to_repo=repo_url,
+            only_commits=only_commits,
+            single=single_hash,
+            num_workers=num_workers,
+        ).traverse_commits():
+            try:
+                commit_rows.append({
+                    "hash": commit.hash,
+                    "repo_url": repo_url.removesuffix(".git"),
+                    "author": commit.author.name if commit.author else None,
+                    "commit_date": commit.committer_date,
+                    "dmm_unit_size": commit.dmm_unit_size,
+                    "dmm_unit_complexity": commit.dmm_unit_complexity,
+                    "num_lines_added": commit.insertions,
+                    "num_lines_deleted": commit.deletions,
+                })
+                fr, mr = _get_file_rows(commit, blob_store)
+                file_rows.extend(fr)
+                method_rows.extend(mr)
+            except Exception as exc:
+                logger.warning("Error processing commit %s: %s", commit.hash, exc)
+    except Exception as exc:
+        logger.warning("Error traversing repo %s: %s", repo_url, exc)
+
+    return commit_rows, file_rows, method_rows
+
+
+def run_collection(
+    df_fixes: pl.DataFrame,
+    blob_store: BlobStore,
+    staging_path: str | Path,
+    num_workers: int = 4,
+    already_done_hashes: set[str] | None = None,
+) -> None:
+    """
+    For each unique repo in *df_fixes*, extract commits and write staging Parquets.
+
+    Rows are flushed to disk after each repository so memory usage stays
+    proportional to the largest single repo, not to the total dataset.
+
+    Parameters
+    ----------
+    df_fixes:            DataFrame with columns cve_id, hash, repo_url
+    blob_store:          BlobStore instance
+    staging_path:        directory to write staging Parquet files
+                         (part files written via stg.append)
+    num_workers:         PyDriller parallelism
+    already_done_hashes: hashes already present in staging (incremental update)
+    """
+    from update import staging as stg
+
+    staging_path = Path(staging_path)
+    staging_path.mkdir(parents=True, exist_ok=True)
+    # stg.append() takes the parquet base (parent of staging/)
+    parquet_base = staging_path.parent
+
+    if already_done_hashes:
+        df_fixes = df_fixes.filter(~pl.col("hash").is_in(list(already_done_hashes)))
+
+    repo_urls = df_fixes["repo_url"].unique().to_list()
+
+    for idx, repo_url in enumerate(repo_urls, 1):
+        hashes = (
+            df_fixes
+            .filter(pl.col("repo_url") == repo_url)["hash"]
+            .unique()
+            .to_list()
+        )
+        logger.info(
+            "Processing repo %d/%d: %s (%d hashes)",
+            idx, len(repo_urls), repo_url.split("/")[-1], len(hashes),
+        )
+        try:
+            cr, fr, mr = extract_commits(repo_url, hashes, blob_store, num_workers)
+        except Exception as exc:
+            logger.warning("Skipping repo %s: %s", repo_url, exc)
+            continue
+
+        # Flush each repo's rows to a part file immediately — never accumulate
+        # across repos so peak memory is proportional to the largest single repo.
+        if cr:
+            stg.append(pl.DataFrame(cr), parquet_base, "commits")
+        if fr:
+            stg.append(pl.DataFrame(fr), parquet_base, "file_change")
+        if mr:
+            stg.append(pl.DataFrame(mr), parquet_base, "method_change")
